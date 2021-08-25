@@ -407,6 +407,11 @@ bool TinyGLTFLoader::load(const FilePath& filePath, MeshList& meshList)
                             for (size_t v = 0; v < vectorSize; v++)
                             {
                                 float bufferData = *(floatPointer + v);
+                                // Invert uvs to match desired Y-up convention
+                                if (v == 1 && texcoordStream == geomStream)
+                                {
+                                    bufferData = 1.0f - bufferData;
+                                }
                                 buffer.push_back(bufferData);
                                 if (_debugLevel > 1)
                                     std::cout << std::to_string(buffer[i]) + " ";
