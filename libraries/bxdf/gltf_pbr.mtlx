@@ -18,12 +18,41 @@
     <input name="clearcoat_roughness" type="float" value="0" uimin="0" uimax="1" uiname="Clearcoat Roughness" uifolder="Clearcoat" />
     <input name="clearcoat_normal" type="vector3" defaultgeomprop="Nworld" uiname="Clearcoat Normal" uifolder="Clearcoat" />
     <input name="emissive_color" type="color3" value="0, 0, 0" uimin="0, 0, 0" uisoftmax="1, 1, 1" uiname="Emissive Color" uifolder="Emission" />
+    <input name="attenuation_distance" uniform="true" type="float" uimin="0" uiname="Attenuation Distance" uifolder="Volume" />
+    <input name="attenuation_color" uniform="true" type="color3" value="1, 1, 1" uimin="0, 0, 0" uimax="1, 1, 1" uiname="Attenuation Color" uifolder="Volume" />
     <output name="out" type="surfaceshader" />
   </nodedef>
-  
+
   <nodegraph name="IMPL_gltf_pbr_surfaceshader" nodedef="ND_gltf_pbr_surfaceshader">
+    <!-- Volume -->
+
+    <convert name="attenuation_color_vec" type="vector3">
+      <input name="in" type="color3" interfacename="attenuation_color" />
+    </convert>
+
+    <ln name="ln_attenuation_color_vec" type="vector3">
+      <input name="in" type="vector3" nodename="attenuation_color_vec" />
+    </ln>
+
+    <divide name="ln_attenuation_color_vec_over_distance" type="vector3">
+      <input name="in1" type="vector3" nodename="ln_attenuation_color_vec" />
+      <input name="in2" type="float" interfacename="attenuation_distance" />
+    </divide>
+
+    <multiply name="attenuation_coeff" type="vector3">
+      <input name="in1" type="vector3" nodename="ln_attenuation_color_vec_over_distance" />
+      <input name="in2" type="float" value="-1" />
+    </multiply>
+
+    <anisotropic_vdf name="isotropic_volume" type="VDF">
+      <!-- No scattering yet, so absorption_coeff == attenuation_coeff -->
+      <input name="absorption" type="vector3" nodename="attenuation_coeff" />
+      <input name="scattering" type="vector3" value="0, 0, 0" />
+      <input name="anisotropy" type="float" value="0" />
+    </anisotropic_vdf>
+
     <!-- Base layer -->
-    
+
     <!-- Compute F0 and F90 of dielectric component -->
     <subtract name="one_minus_ior" type="float">
       <input name="in1" type="float" value="1" />
@@ -54,7 +83,7 @@
       <input name="in1" type="color3" nodename="dielectric_f0_from_ior_specular_color" />
       <input name="in2" type="float" value="1" />
     </min>
-    
+
     <multiply name="dielectric_f0" type="color3">
       <input name="in1" type="color3" nodename="clamped_dielectric_f0_from_ior_specular_color" />
       <input name="in2" type="float" interfacename="specular" />
@@ -71,52 +100,63 @@
       <input name="roughness" type="float" interfacename="roughness" />
     </roughness_anisotropy>
 
-    <!-- Diffuse -->
+    <!-- Opaque dielectric -->
 
     <oren_nayar_diffuse_bsdf name="diffuse_bsdf" type="BSDF">
       <input name="color" type="color3" interfacename="base_color" />
       <input name="normal" type="vector3" interfacename="normal" />
     </oren_nayar_diffuse_bsdf>
 
-    <!-- Transmission -->
-
-    <generalized_schlick_bsdf name="transmission_bsdf" type="BSDF">
+    <generalized_schlick_bsdf name="reflection_over_diffuse_bsdf" type="BSDF">
       <input name="color0" type="color3" nodename="dielectric_f0" />
       <input name="color90" type="color3" nodename="dielectric_f90" />
+      <input name="roughness" type="vector2" nodename="roughness_uv" />
+      <input name="normal" type="vector3" interfacename="normal" />
+      <input name="scatter_mode" type="string" value="R" />
+    </generalized_schlick_bsdf>
+
+    <layer name="opaque_dielectric_bsdf" type="BSDF">
+      <input name="top" type="BSDF" nodename="reflection_over_diffuse_bsdf" />
+      <input name="base" type="BSDF" nodename="diffuse_bsdf" />
+    </layer>
+
+    <!-- Transmissive dielectric -->
+
+    <dielectric_bsdf name="transmission_bsdf" type="BSDF">
+      <input name="weight" type="float" value="1" />
+      <input name="tint" type="color3" interfacename="base_color" />
+      <input name="ior" type="float" interfacename="ior" />
       <input name="roughness" type="vector2" nodename="roughness_uv" />
       <input name="normal" type="vector3" interfacename="normal" />
       <input name="scatter_mode" type="string" value="T" />
-    </generalized_schlick_bsdf>
-    
-    <multiply name="tinted_transmission_bsdf" type="BSDF">
-      <input name="in1" type="BSDF" nodename="transmission_bsdf" />
-      <input name="in2" type="color3" interfacename="base_color" />
-    </multiply>
+    </dielectric_bsdf>
 
-    <!-- Mix diffuse and transmission -->
+    <layer name="transmission_over_volume_bsdf" type="BSDF">
+      <input name="top" type="BSDF" nodename="transmission_bsdf" />
+      <input name="base" type="VDF" nodename="isotropic_volume" />
+    </layer>
 
-    <mix name="dielectric_transmission_mix" type="BSDF">
-      <input name="bg" type="BSDF" nodename="diffuse_bsdf" />
-      <input name="fg" type="BSDF" nodename="transmission_bsdf" />
-      <input name="mix" type="float" interfacename="transmission" />
-    </mix>
-
-    <!-- Specular Reflection -->
-
-    <generalized_schlick_bsdf name="specular_bsdf" type="BSDF">
+    <generalized_schlick_bsdf name="reflection_over_transmission_bsdf" type="BSDF">
       <input name="color0" type="color3" nodename="dielectric_f0" />
       <input name="color90" type="color3" nodename="dielectric_f90" />
       <input name="roughness" type="vector2" nodename="roughness_uv" />
       <input name="normal" type="vector3" interfacename="normal" />
+      <input name="scatter_mode" type="string" value="R" />
     </generalized_schlick_bsdf>
 
-    <!-- Dielectric -->
-
-    <layer name="base_dielectric_layer" type="BSDF">
-      <input name="top" type="BSDF" nodename="specular_bsdf" />
-      <input name="base" type="BSDF" nodename="dielectric_transmission_mix" />
+    <layer name="transmissive_dielectric_bsdf" type="BSDF">
+      <input name="top" type="BSDF" nodename="reflection_over_transmission_bsdf" />
+      <input name="base" type="BSDF" nodename="transmission_over_volume_bsdf" />
     </layer>
-    
+
+    <!-- Mix opaque and transmissive dielectric -->
+
+    <mix name="base_dielectric_layer" type="BSDF">
+      <input name="bg" type="BSDF" nodename="opaque_dielectric_bsdf" />
+      <input name="fg" type="BSDF" nodename="transmissive_dielectric_bsdf" />
+      <input name="mix" type="float" interfacename="transmission" />
+    </mix>
+
     <!-- Metal -->
 
     <generalized_schlick_bsdf name="metal_bsdf" type="BSDF">
@@ -135,7 +175,7 @@
     </mix>
 
     <!-- Sheen layer -->
-    
+
     <!-- Compute sheen intensity = max(sheen_color.r, sheen_color.g, sheen_color.b) -->
     <extract name="sheen_color_r" type="float">
       <input name="in" type="color3" interfacename="sheen_color" />
@@ -171,7 +211,7 @@
       <input name="in1" type="color3" interfacename="sheen_color" />
       <input name="in2" type="float" nodename="sheen_intensity" />
     </divide>
-    
+
     <sheen_bsdf name="sheen_bsdf" type="BSDF">
       <input name="weight" type="float" nodename="sheen_intensity" />
       <input name="color" type="color3" nodename="sheen_color_normalized" />
@@ -216,21 +256,21 @@
       <input name="in1" type="float" value="1" />
       <input name="in2" type="float" value="0" />
     </ifgreatereq>
-    
+
     <ifequal name="opacity_mask" type="float">
       <input name="value1" type="integer" interfacename="alpha_mode" />
       <input name="value2" type="integer" value="1" />
       <input name="in1" type="float" nodename="opacity_mask_cutoff" />
       <input name="in2" type="float" interfacename="alpha" />
     </ifequal>
-    
+
     <ifequal name="opacity" type="float">
       <input name="value1" type="integer" interfacename="alpha_mode" />
       <input name="value2" type="integer" value="0" />
       <input name="in1" type="float" value="1" />
       <input name="in2" type="float" nodename="opacity_mask" />
     </ifequal>
-    
+
     <!-- Surface -->
 
     <surface name="shader_constructor" type="surfaceshader">
