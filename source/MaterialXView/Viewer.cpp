@@ -1193,7 +1193,27 @@ void Viewer::loadDocument(const mx::FilePath& filename, mx::DocumentPtr librarie
     {
         // Load source document.
         mx::DocumentPtr doc = mx::createDocument();
-        mx::readFromXmlFile(doc, filename, _searchPath, &readOptions);
+        //mx::readFromXmlFile(doc, filename, _searchPath, &readOptions);
+
+        // :EdM: testing!!
+        doc->setAttribute("colorspace", "lin_rec709");
+        auto gltf_node = doc->addChildOfCategory("gltf_pbr", "gltf_main");
+        gltf_node->setAttribute("type", "surfaceshader");
+
+        auto baseColor = gltf_node->addChildOfCategory("input", "base_color");
+        baseColor->setAttribute("type", "color3");
+        baseColor->setAttribute("value", "0.8, 0.7, 0.2");
+
+        auto metallic = gltf_node->addChildOfCategory("input", "metallic");
+        metallic->setAttribute("type", "float");
+        metallic->setAttribute("value", "1.0");
+
+        auto surface_node = doc->addChildOfCategory("surfacematerial", "gltf_out");
+        surface_node->setAttribute("type", "material");
+
+        auto surfaceInput = surface_node->addChildOfCategory("input", "surfaceshader");
+        surfaceInput->setAttribute("type", "surfaceshader");
+        surfaceInput->setAttribute("nodename", "gltf_main");
 
         // Import libraries.
         doc->importLibrary(libraries);
@@ -1272,9 +1292,9 @@ void Viewer::loadDocument(const mx::FilePath& filename, mx::DocumentPtr librarie
             else
             {
                 MaterialPtr mat = Material::create();
-                mat->setDocument(doc);
-                mat->setElement(typedElem);
-                mat->setMaterialNode(materialNodes[i]);
+                mat->setDocument(doc);                  // doc is category "materialx" name "" sourceURI is the full path & filename.
+                mat->setElement(typedElem);             // typedElem is category "gltf_pbr" name "SR_default" from the sample glTF material.
+                mat->setMaterialNode(materialNodes[i]); // materialNodes[0] is category "surfacematerial" name "Default" from the sample glTF material.
                 newMaterials.push_back(mat);
             }
         }
